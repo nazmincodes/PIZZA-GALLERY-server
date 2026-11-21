@@ -9,6 +9,9 @@ import {
     getVendorStatistics,
     getAllTransactions,
     getTransactionStatistics,
+    getAllUsers,
+    updateUserBanStatus,
+    getMenuStatistics,
 } from "../controllers/admin.controller.js";
 
 import { menuApprovalSchema } from "../validators/menu.validator.js";
@@ -93,5 +96,30 @@ router.get(
     getTransactionStatistics
 );
 
+// Admin: Get All Users
+router.get(
+    "/users",
+    authenticateUser,
+    authorizeRoles("admin"),
+    getAllUsers
+);
+
+// Admin: Block or Unblock User
+router.patch(
+    "/users/:userId/status",
+    authenticateUser,
+    authorizeRoles("admin"),
+    updateUserBanStatus
+);
+
+// Admin: Get Menu Statistics
+router.get(
+    "/menu/statistics",
+    authenticateUser,
+    authorizeRoles("admin"),
+    getMenuStatistics
+);
+
 export default router;
+
 

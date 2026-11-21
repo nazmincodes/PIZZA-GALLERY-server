@@ -7,7 +7,9 @@ import type { MenuApprovalInput } from "../validators/menu.validator.js";
 import { getOrderCollection } from "../models/order.model.js";
 import type { OrderStatus } from "../types/order.types.js";
 import { getTransactionCollection } from "../models/transaction.model.js";
+import { getDB } from "../config/db.js";
 
+// Admin: Get All Pending Vendors
 export const getPendingVendors = async (
     _req: Request,
     res: Response
@@ -24,7 +26,6 @@ export const getPendingVendors = async (
             total: vendors.length,
             vendors,
         });
-
     } catch (error) {
         console.error("Get pending vendors error:", error);
 
@@ -35,7 +36,7 @@ export const getPendingVendors = async (
     }
 };
 
-
+// Admin: Approve or Reject Vendor
 export const updateVendorApprovalStatus = async (
     req: Request,
     res: Response
@@ -43,21 +44,15 @@ export const updateVendorApprovalStatus = async (
     try {
         const vendorId = req.params.vendorId;
 
-        if (typeof vendorId !== "string") {
-            res.status(400).json({
-                success: false,
-                message: "Invalid vendor ID.",
-            });
-            return;
-        } const { status } = req.body as VendorApprovalInput;
-
-        if (!ObjectId.isValid(vendorId)) {
+        if (typeof vendorId !== "string" || !ObjectId.isValid(vendorId)) {
             res.status(400).json({
                 success: false,
                 message: "Invalid vendor ID.",
             });
             return;
         }
+
+        const { status } = req.body as VendorApprovalInput;
 
         const result = await getVendorCollection().updateOne(
             {
@@ -84,7 +79,6 @@ export const updateVendorApprovalStatus = async (
             success: true,
             message: `Vendor ${status} successfully.`,
         });
-
     } catch (error) {
         console.error("Update vendor approval error:", error);
 
@@ -112,7 +106,6 @@ export const getPendingMenuItems = async (
             total: menuItems.length,
             menuItems,
         });
-
     } catch (error) {
         console.error("Get pending menu items error:", error);
 
@@ -166,7 +159,6 @@ export const updateMenuApprovalStatus = async (
             success: true,
             message: `Menu item ${status} successfully.`,
         });
-
     } catch (error) {
         console.error("Update menu approval error:", error);
 
@@ -242,7 +234,6 @@ export const getAllOrders = async (
             },
             orders,
         });
-
     } catch (error) {
         console.error("Get all orders error:", error);
 
@@ -255,7 +246,7 @@ export const getAllOrders = async (
 
 // Admin: Get Order Statistics
 export const getOrderStatistics = async (
-    req: Request,
+    _req: Request,
     res: Response
 ): Promise<void> => {
     try {
@@ -275,25 +266,20 @@ export const getOrderStatistics = async (
             orderCollection.countDocuments({ status: "delivered" }),
             orderCollection.countDocuments({ status: "cancelled" }),
 
-            orderCollection.aggregate([
-                {
-                    $match: {
-                        status: "delivered",
-                    },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        totalRevenue: {
-                            $sum: "$totalPrice",
+            orderCollection
+                .aggregate([
+                    { $match: { status: "delivered" } },
+                    {
+                        $group: {
+                            _id: null,
+                            totalRevenue: { $sum: "$totalPrice" },
                         },
                     },
-                },
-            ]).toArray(),
+                ])
+                .toArray(),
         ]);
 
-        const deliveredRevenue =
-            revenueResult[0]?.totalRevenue || 0;
+        const deliveredRevenue = revenueResult[0]?.totalRevenue || 0;
 
         res.status(200).json({
             success: true,
@@ -307,7 +293,6 @@ export const getOrderStatistics = async (
                 deliveredRevenue,
             },
         });
-
     } catch (error) {
         console.error("Get order statistics error:", error);
 
@@ -320,7 +305,7 @@ export const getOrderStatistics = async (
 
 // Admin: Get Vendor Statistics
 export const getVendorStatistics = async (
-    req: Request,
+    _req: Request,
     res: Response
 ): Promise<void> => {
     try {
@@ -354,7 +339,6 @@ export const getVendorStatistics = async (
                 premiumVendors,
             },
         });
-
     } catch (error) {
         console.error("Get vendor statistics error:", error);
 
@@ -365,31 +349,26 @@ export const getVendorStatistics = async (
     }
 };
 
+// Admin: Get All Transactions (with vendor name and email)
 export const getAllTransactions = async (
     req: Request,
     res: Response
 ): Promise<void> => {
     try {
         const page = Math.max(1, Number(req.query.page) || 1);
-        const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 10));
+        const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 50));
         const skip = (page - 1) * limit;
 
-        const validStatuses = [
-            "pending",
-            "succeeded",
-            "failed",
-            "refunded",
-        ];
+        const validStatuses = ["pending", "succeeded", "failed", "refunded"];
 
         const status = req.query.status;
 
-        const filter: { status?: "pending" | "succeeded" | "failed" | "refunded" } = {};
+        const filter: {
+            status?: "pending" | "succeeded" | "failed" | "refunded";
+        } = {};
 
         if (status !== undefined) {
-            if (
-                typeof status !== "string" ||
-                !validStatuses.includes(status)
-            ) {
+            if (typeof status !== "string" || !validStatuses.includes(status)) {
                 res.status(400).json({
                     success: false,
                     message: "Invalid transaction status.",
@@ -413,6 +392,55 @@ export const getAllTransactions = async (
             transactionCollection.countDocuments(filter),
         ]);
 
+        // Get vendors for these transactions
+        const vendorIds = [
+            ...new Set(transactions.map((transaction) => transaction.vendorId)),
+        ];
+
+        const validVendorIds = vendorIds
+            .filter((id) => ObjectId.isValid(id))
+            .map((id) => new ObjectId(id));
+
+        const vendors = await getVendorCollection()
+            .find({ _id: { $in: validVendorIds } })
+            .toArray();
+
+        // Get users of those vendors (user _id is an ObjectId in the DB)
+        const userObjectIds = [
+            ...new Set(vendors.map((vendor) => vendor.userId)),
+        ]
+            .filter((id) => ObjectId.isValid(id))
+            .map((id) => new ObjectId(id));
+
+        const users = await getDB()
+            .collection("user")
+            .find({ _id: { $in: userObjectIds } })
+            .toArray();
+
+        // Lookup maps
+        const vendorMap = new Map(
+            vendors.map((vendor) => [vendor._id!.toString(), vendor])
+        );
+
+        const userMap = new Map(
+            users.map((user) => [String(user._id), user])
+        );
+
+        const formattedTransactions = transactions.map((transaction) => {
+            const vendor = vendorMap.get(transaction.vendorId);
+            const user = vendor ? userMap.get(vendor.userId) : undefined;
+
+            return {
+                ...transaction,
+                id: transaction._id?.toString() || transaction.stripeSessionId,
+                vendorName: vendor?.restaurantName || "Unknown Vendor",
+                email: user?.email || "N/A",
+                plan: transaction.plan,
+                paymentMethod: "Stripe",
+                date: transaction.createdAt,
+            };
+        });
+
         res.status(200).json({
             success: true,
             message: "Transactions retrieved successfully.",
@@ -422,7 +450,7 @@ export const getAllTransactions = async (
                 limit,
                 totalPages: Math.ceil(total / limit),
             },
-            transactions,
+            transactions: formattedTransactions,
         });
     } catch (error) {
         console.error("Get all transactions error:", error);
@@ -434,8 +462,9 @@ export const getAllTransactions = async (
     }
 };
 
+// Admin: Get Transaction Statistics
 export const getTransactionStatistics = async (
-    req: Request,
+    _req: Request,
     res: Response
 ): Promise<void> => {
     try {
@@ -455,15 +484,17 @@ export const getTransactionStatistics = async (
             transactionCollection.countDocuments({ status: "failed" }),
             transactionCollection.countDocuments({ status: "refunded" }),
 
-            transactionCollection.aggregate([
-                { $match: { status: "succeeded" } },
-                {
-                    $group: {
-                        _id: null,
-                        totalRevenue: { $sum: "$amount" },
+            transactionCollection
+                .aggregate([
+                    { $match: { status: "succeeded" } },
+                    {
+                        $group: {
+                            _id: null,
+                            totalRevenue: { $sum: "$amount" },
+                        },
                     },
-                },
-            ]).toArray(),
+                ])
+                .toArray(),
         ]);
 
         const totalRevenue = revenueResult[0]?.totalRevenue || 0;
@@ -487,6 +518,166 @@ export const getTransactionStatistics = async (
         res.status(500).json({
             success: false,
             message: "Failed to retrieve transaction statistics.",
+        });
+    }
+};
+
+// Admin: Get All Users
+export const getAllUsers = async (
+    _req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const userCollection = getDB().collection("user");
+
+        const users = await userCollection
+            .find(
+                {},
+                {
+                    projection: {
+                        name: 1,
+                        email: 1,
+                        role: 1,
+                        banned: 1,
+                        createdAt: 1,
+                    },
+                }
+            )
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        res.status(200).json({
+            success: true,
+            total: users.length,
+            users: users.map((user) => ({
+                id: String(user._id ?? user.id),
+                name: user.name,
+                email: user.email,
+                role: user.role || "customer",
+                status: user.banned ? "Blocked" : "Active",
+                joinedDate: user.createdAt,
+            })),
+        });
+    } catch (error) {
+        console.error("Get all users error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve users.",
+        });
+    }
+};
+
+// Admin: Block or Unblock User
+export const updateUserBanStatus = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const userId = Array.isArray(req.params.userId)
+            ? req.params.userId[0]
+            : req.params.userId;
+
+        const { banned } = req.body as { banned?: boolean };
+
+        if (!userId || typeof banned !== "boolean") {
+            res.status(400).json({
+                success: false,
+                message: "Valid user ID and banned status are required.",
+            });
+            return;
+        }
+
+        if (userId === req.user?.id) {
+            res.status(400).json({
+                success: false,
+                message: "You cannot block your own account.",
+            });
+            return;
+        }
+
+        const userCollection = getDB().collection("user");
+
+        const result = await userCollection.updateOne(
+            {
+                $or: [
+                    { id: userId },
+                    ...(ObjectId.isValid(userId)
+                        ? [{ _id: new ObjectId(userId) }]
+                        : []),
+                ],
+                role: { $in: ["customer", "vendor"] },
+            },
+            {
+                $set: {
+                    banned,
+                    banReason: banned ? "Blocked by admin" : null,
+                    banExpires: null,
+                    updatedAt: new Date(),
+                },
+            }
+        );
+
+        if (result.matchedCount === 0) {
+            res.status(404).json({
+                success: false,
+                message: "User not found or cannot be modified.",
+            });
+            return;
+        }
+
+        res.status(200).json({
+            success: true,
+            message: banned
+                ? "User blocked successfully."
+                : "User unblocked successfully.",
+        });
+    } catch (error) {
+        console.error("Update user ban status error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to update user status.",
+        });
+    }
+};
+
+// Admin: Get Menu Statistics
+export const getMenuStatistics = async (
+    _req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const menuCollection = getMenuCollection();
+
+        const [
+            totalMenuItems,
+            pendingMenuItems,
+            approvedMenuItems,
+            rejectedMenuItems,
+        ] = await Promise.all([
+            menuCollection.countDocuments(),
+            menuCollection.countDocuments({ status: "pending" }),
+            menuCollection.countDocuments({ status: "approved" }),
+            menuCollection.countDocuments({ status: "rejected" }),
+        ]);
+
+        res.status(200).json({
+            success: true,
+            message: "Menu statistics retrieved successfully.",
+            statistics: {
+                totalMenuItems,
+                pendingMenuItems,
+                approvedMenuItems,
+                rejectedMenuItems,
+            },
+        });
+    } catch (error) {
+        console.error("Get menu statistics error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve menu statistics.",
         });
     }
 };

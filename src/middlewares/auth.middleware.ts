@@ -10,6 +10,9 @@ import type {
     NextFunction,
 } from "express";
 
+import { ObjectId } from "mongodb";
+import { getDB } from "../config/db.js";
+
 const BETTER_AUTH_URL =
     process.env.BETTER_AUTH_URL || "http://localhost:3000";
 
@@ -67,11 +70,7 @@ export const authenticateUser = async (
 
         const user = payload as PizzaHubJWTPayload;
 
-        if (
-            !user.id ||
-            !user.email ||
-            !["customer", "vendor", "admin"].includes(user.role || "")
-        ) {
+        if (!user.id || !user.email) {
             res.status(401).json({
                 success: false,
                 message: "Invalid user information.",
@@ -79,15 +78,49 @@ export const authenticateUser = async (
             return;
         }
 
+        // Find the latest user information from MongoDB
+        const userCollection = getDB().collection("user");
+
+        const dbUser = await userCollection.findOne({
+            $or: [
+                { id: user.id },
+                ...(ObjectId.isValid(user.id)
+                    ? [{ _id: new ObjectId(user.id) }]
+                    : []),
+            ],
+        });
+
+        // Reject blocked or deleted users
+        if (!dbUser || dbUser.banned === true) {
+            res.status(403).json({
+                success: false,
+                message: "Your account is blocked or no longer available.",
+            });
+            return;
+        }
+
+        // Always use the current database role
+        const role = dbUser.role;
+
+        if (!["customer", "vendor", "admin"].includes(role)) {
+            res.status(403).json({
+                success: false,
+                message: "Invalid user role.",
+            });
+            return;
+        }
+
         req.user = {
             id: user.id,
-            email: user.email,
-            role: user.role as AuthUser["role"],
+            email: dbUser.email || user.email,
+            role: role as AuthUser["role"],
         };
 
         next();
 
-    } catch {
+    } catch (error) {
+        console.error("Authentication error:", error);
+
         res.status(401).json({
             success: false,
             message: "Invalid or expired authentication token.",
