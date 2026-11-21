@@ -7,8 +7,8 @@ import { getTransactionCollection } from "../models/transaction.model.js";
 import { getMenuCollection } from "../models/menu.model.js";
 
 // Apply Free Plan menu restrictions
-const applyFreePlanRestrictions = async (userId: string) => {
-    const menuCollection = getMenuCollection();
+export const applyFreePlanRestrictions = async (userId: string) => {
+        const menuCollection = getMenuCollection();
 
     // Get all active menu items, oldest first
     const activeItems = await menuCollection
