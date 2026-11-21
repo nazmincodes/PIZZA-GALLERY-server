@@ -1,13 +1,13 @@
 import { Router } from "express";
 import { authenticateUser } from "../middlewares/auth.middleware.js";
-
+import subscriptionRoutes from "./subscription.routes.js";
 import vendorRoutes from "./vendor.routes.js";
 import menuRoutes from "./menu.routes.js";
 import adminRoutes from "./admin.routes.js";
 import orderRoutes from "./order.routes.js";
 
 const router = Router();
-
+router.use("/subscriptions", subscriptionRoutes);
 // Health Check
 router.get("/health", (_req, res) => {
     res.status(200).json({

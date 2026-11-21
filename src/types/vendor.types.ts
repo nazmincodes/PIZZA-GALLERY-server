@@ -25,6 +25,8 @@ export interface Vendor {
     subscriptionPlan: SubscriptionPlan;
     subscriptionStatus: SubscriptionStatus;
 
+    stripeSubscriptionId?: string;
+
     createdAt: Date;
     updatedAt: Date;
 }

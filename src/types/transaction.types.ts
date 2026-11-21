@@ -18,7 +18,7 @@ export interface Transaction {
     plan: "premium";
 
     amount: number;
-    currency: "usd";
+    currency: string;
 
     status: TransactionStatus;
 

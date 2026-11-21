@@ -1,14 +1,17 @@
 import type { Request, Response } from "express";
+import { ObjectId } from "mongodb";
+
 import { getMenuCollection } from "../models/menu.model.js";
 import { getVendorCollection } from "../models/vendor.model.js";
+
 import type { MenuItem } from "../types/menu.types.js";
-import type { CreateMenuInput } from "../validators/menu.validator.js";
-import { ObjectId } from "mongodb";
-import type { UpdateMenuInput } from "../validators/menu.validator.js";
 import type {
+    CreateMenuInput,
+    UpdateMenuInput,
     UpdateMenuAvailabilityInput,
 } from "../validators/menu.validator.js";
 
+// Create Menu Item
 export const createMenuItem = async (
     req: Request,
     res: Response
@@ -22,7 +25,6 @@ export const createMenuItem = async (
             return;
         }
 
-        // Find vendor profile
         const vendor = await getVendorCollection().findOne({
             userId: req.user.id,
         });
@@ -35,7 +37,6 @@ export const createMenuItem = async (
             return;
         }
 
-        // Check vendor approval
         if (vendor.status !== "approved") {
             res.status(403).json({
                 success: false,
@@ -44,14 +45,11 @@ export const createMenuItem = async (
             return;
         }
 
-        const data = req.body as CreateMenuInput;
-
-        // Check subscription plan
         const isPremium =
             vendor.subscriptionPlan === "premium" &&
             vendor.subscriptionStatus === "active";
 
-        // Free vendor can have maximum 3 active items
+        // Free Plan: Maximum 3 active menu items
         if (!isPremium) {
             const activeItems = await getMenuCollection().countDocuments({
                 vendorId: req.user.id,
@@ -67,9 +65,11 @@ export const createMenuItem = async (
             }
         }
 
-        // Create new menu item
+        const data = req.body as CreateMenuInput;
+
         const newMenuItem: MenuItem = {
             vendorId: req.user.id,
+
             name: data.name,
             description: data.description,
             price: data.price,
@@ -81,7 +81,8 @@ export const createMenuItem = async (
 
             status: "pending",
             isActive: true,
-            isFeatured: false,
+            isFeatured: isPremium,
+
             rating: 0,
             totalReviews: 0,
 
@@ -99,7 +100,6 @@ export const createMenuItem = async (
                 _id: result.insertedId,
             },
         });
-
     } catch (error) {
         console.error("Create menu item error:", error);
 
@@ -110,6 +110,7 @@ export const createMenuItem = async (
     }
 };
 
+// Get My Menu Items
 export const getMyMenuItems = async (
     req: Request,
     res: Response
@@ -136,7 +137,6 @@ export const getMyMenuItems = async (
             total: menuItems.length,
             menuItems,
         });
-
     } catch (error) {
         console.error("Get vendor menu items error:", error);
 
@@ -147,19 +147,90 @@ export const getMyMenuItems = async (
     }
 };
 
-
 // Get All Approved and Active Menu Items
+// Premium Vendor Items will appear first
 export const getPublicMenuItems = async (
     _req: Request,
     res: Response
 ): Promise<void> => {
     try {
         const menuItems = await getMenuCollection()
-            .find({
-                status: "approved",
-                isActive: true,
-            })
-            .sort({ createdAt: -1 })
+            .aggregate<MenuItem>([
+                {
+                    $match: {
+                        status: "approved",
+                        isActive: true,
+                    },
+                },
+                {
+                    $lookup: {
+                        from: "vendors",
+                        localField: "vendorId",
+                        foreignField: "userId",
+                        as: "vendor",
+                    },
+                },
+                {
+                    $addFields: {
+                        isPremiumVendor: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        {
+                                            $eq: [
+                                                {
+                                                    $arrayElemAt: [
+                                                        "$vendor.subscriptionPlan",
+                                                        0,
+                                                    ],
+                                                },
+                                                "premium",
+                                            ],
+                                        },
+                                        {
+                                            $eq: [
+                                                {
+                                                    $arrayElemAt: [
+                                                        "$vendor.subscriptionStatus",
+                                                        0,
+                                                    ],
+                                                },
+                                                "active",
+                                            ],
+                                        },
+                                    ],
+                                },
+                                1,
+                                0,
+                            ],
+                        },
+                    },
+                },
+                {
+                    $addFields: {
+                        isFeatured: {
+                            $cond: [
+                                { $eq: ["$isPremiumVendor", 1] },
+                                true,
+                                "$isFeatured",
+                            ],
+                        },
+                    },
+                },
+                {
+                    $sort: {
+                        isPremiumVendor: -1,
+                        isFeatured: -1,
+                        createdAt: -1,
+                    },
+                },
+                {
+                    $project: {
+                        vendor: 0,
+                        isPremiumVendor: 0,
+                    },
+                },
+            ])
             .toArray();
 
         res.status(200).json({
@@ -168,7 +239,6 @@ export const getPublicMenuItems = async (
             total: menuItems.length,
             menuItems,
         });
-
     } catch (error) {
         console.error("Get public menu items error:", error);
 
@@ -185,6 +255,14 @@ export const deleteMenuItem = async (
     res: Response
 ): Promise<void> => {
     try {
+        if (!req.user) {
+            res.status(401).json({
+                success: false,
+                message: "Authentication required.",
+            });
+            return;
+        }
+
         const menuItemId = req.params.menuItemId;
 
         if (
@@ -200,7 +278,7 @@ export const deleteMenuItem = async (
 
         const result = await getMenuCollection().deleteOne({
             _id: new ObjectId(menuItemId),
-            vendorId: req.user!.id,
+            vendorId: req.user.id,
         });
 
         if (result.deletedCount === 0) {
@@ -215,16 +293,13 @@ export const deleteMenuItem = async (
             success: true,
             message: "Menu item deleted successfully.",
         });
-
     } catch (error) {
         console.error("Delete menu item error:", error);
 
         res.status(500).json({
             success: false,
             message: "Failed to delete menu item.",
-
         });
-
     }
 };
 
@@ -234,6 +309,14 @@ export const updateMenuItem = async (
     res: Response
 ): Promise<void> => {
     try {
+        if (!req.user) {
+            res.status(401).json({
+                success: false,
+                message: "Authentication required.",
+            });
+            return;
+        }
+
         const menuItemId = req.params.menuItemId;
 
         if (
@@ -252,7 +335,7 @@ export const updateMenuItem = async (
         const result = await getMenuCollection().updateOne(
             {
                 _id: new ObjectId(menuItemId),
-                vendorId: req.user!.id,
+                vendorId: req.user.id,
             },
             {
                 $set: {
@@ -275,7 +358,6 @@ export const updateMenuItem = async (
             success: true,
             message: "Menu item updated successfully. It is pending admin review.",
         });
-
     } catch (error) {
         console.error("Update menu item error:", error);
 
@@ -292,6 +374,14 @@ export const updateMenuAvailability = async (
     res: Response
 ): Promise<void> => {
     try {
+        if (!req.user) {
+            res.status(401).json({
+                success: false,
+                message: "Authentication required.",
+            });
+            return;
+        }
+
         const menuItemId = req.params.menuItemId;
 
         if (
@@ -307,10 +397,47 @@ export const updateMenuAvailability = async (
 
         const { isActive } = req.body as UpdateMenuAvailabilityInput;
 
+        // Check Free/Premium Plan when activating an item
+        if (isActive) {
+            const vendor = await getVendorCollection().findOne({
+                userId: req.user.id,
+            });
+
+            if (!vendor) {
+                res.status(404).json({
+                    success: false,
+                    message: "Vendor profile not found.",
+                });
+                return;
+            }
+
+            const isPremium =
+                vendor.subscriptionPlan === "premium" &&
+                vendor.subscriptionStatus === "active";
+
+            if (!isPremium) {
+                const activeItems = await getMenuCollection().countDocuments({
+                    vendorId: req.user.id,
+                    isActive: true,
+                    _id: {
+                        $ne: new ObjectId(menuItemId),
+                    },
+                });
+
+                if (activeItems >= 3) {
+                    res.status(403).json({
+                        success: false,
+                        message: "Free plan allows maximum 3 active menu items. Deactivate another item or upgrade to Premium.",
+                    });
+                    return;
+                }
+            }
+        }
+
         const result = await getMenuCollection().updateOne(
             {
                 _id: new ObjectId(menuItemId),
-                vendorId: req.user!.id,
+                vendorId: req.user.id,
                 status: "approved",
             },
             {
@@ -333,7 +460,6 @@ export const updateMenuAvailability = async (
             success: true,
             message: `Menu item ${isActive ? "activated" : "deactivated"} successfully.`,
         });
-
     } catch (error) {
         console.error("Update menu availability error:", error);
 
