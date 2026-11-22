@@ -1,9 +1,18 @@
 import { Router } from "express";
-import { createSubscriptionCheckout } from "../controllers/subscription.controller.js";
 import { authenticateUser } from "../middlewares/auth.middleware.js";
 import { authorizeRoles } from "../middlewares/role.middleware.js";
-
+import {
+    createSubscriptionCheckout,
+    getMySubscription,
+} from "../controllers/subscription.controller.js";
 const router = Router();
+
+router.get(
+    "/me",
+    authenticateUser,
+    authorizeRoles("vendor"),
+    getMySubscription
+);
 
 // Create Premium Subscription Checkout
 router.post(
@@ -12,5 +21,6 @@ router.post(
     authorizeRoles("vendor"),
     createSubscriptionCheckout
 );
+
 
 export default router;

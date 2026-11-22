@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import { stripe } from "../config/stripe.js";
 import { getVendorCollection } from "../models/vendor.model.js";
+import { getTransactionCollection } from "../models/transaction.model.js";
+import { getMenuCollection } from "../models/menu.model.js";
 
 export const createSubscriptionCheckout = async (
     req: Request,
@@ -75,11 +77,12 @@ export const createSubscriptionCheckout = async (
 
             customer_email: user.email,
 
+            // Redirect to the existing subscription page
             success_url:
-                `${clientUrl}/dashboard/vendor/subscription/success?session_id={CHECKOUT_SESSION_ID}`,
+                `${clientUrl}/dashboard/subscription?success=true&session_id={CHECKOUT_SESSION_ID}`,
 
             cancel_url:
-                `${clientUrl}/dashboard/vendor/subscription/cancel`,
+                `${clientUrl}/dashboard/subscription?canceled=true`,
 
             metadata: {
                 userId: user.id,
@@ -94,7 +97,7 @@ export const createSubscriptionCheckout = async (
             },
         });
 
-          console.log("Created Stripe Checkout Session:", {
+        console.log("Created Stripe Checkout Session:", {
             id: session.id,
             mode: session.mode,
             metadata: session.metadata,
@@ -112,6 +115,109 @@ export const createSubscriptionCheckout = async (
         res.status(500).json({
             success: false,
             message: "Failed to create subscription checkout session.",
+        });
+    }
+};
+
+export const getMySubscription = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const user = req.user;
+
+        if (!user) {
+            res.status(401).json({
+                success: false,
+                message: "Authentication required.",
+            });
+            return;
+        }
+
+        const vendor = await getVendorCollection().findOne({
+            userId: user.id,
+        });
+
+        if (!vendor) {
+            res.status(404).json({
+                success: false,
+                message: "Vendor profile not found.",
+            });
+            return;
+        }
+
+        const [activeMenuCount, transactions] = await Promise.all([
+            getMenuCollection().countDocuments({
+                vendorId: user.id,
+                isActive: true,
+            }),
+
+            getTransactionCollection()
+                .find({ vendorId: vendor._id!.toString() })
+                .sort({ createdAt: -1 })
+                .limit(20)
+                .toArray(),
+        ]);
+
+        let startDate: Date | null = null;
+        let expiryDate: Date | null = null;
+        let cancelAtPeriodEnd = false;
+
+        if (vendor.stripeSubscriptionId) {
+            try {
+                const subscription = await stripe.subscriptions.retrieve(
+                    vendor.stripeSubscriptionId
+                );
+
+                const period = subscription as unknown as {
+                    start_date?: number;
+                    current_period_end?: number;
+                    cancel_at_period_end?: boolean;
+                };
+
+                startDate = period.start_date
+                    ? new Date(period.start_date * 1000)
+                    : null;
+
+                expiryDate = period.current_period_end
+                    ? new Date(period.current_period_end * 1000)
+                    : null;
+
+                cancelAtPeriodEnd =
+                    period.cancel_at_period_end ?? false;
+            } catch (stripeError) {
+                console.error(
+                    "Stripe subscription retrieval failed:",
+                    stripeError
+                );
+            }
+        }
+
+        const isPremium =
+            vendor.subscriptionPlan === "premium";
+
+        res.status(200).json({
+            success: true,
+            subscription: {
+                plan: vendor.subscriptionPlan,
+                status: vendor.subscriptionStatus,
+                startDate,
+                expiryDate,
+                cancelAtPeriodEnd,
+                activeMenuCount,
+                menuLimit: isPremium ? null : 3,
+                remainingMenuSlots: isPremium
+                    ? null
+                    : Math.max(0, 3 - activeMenuCount),
+            },
+            transactions,
+        });
+    } catch (error) {
+        console.error("Get vendor subscription error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to load subscription details.",
         });
     }
 };
