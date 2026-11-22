@@ -1,11 +1,11 @@
-import type { AuthUser } from "../middlewares/auth.middleware.js";
+import "express-serve-static-core";
 
-declare global {
-    namespace Express {
-        interface Request {
-            user?: AuthUser;
-        }
+declare module "express-serve-static-core" {
+    interface Request {
+        user?: {
+            id: string;
+            email: string;
+            role: "customer" | "vendor" | "admin";
+        };
     }
 }
-
-export {};
