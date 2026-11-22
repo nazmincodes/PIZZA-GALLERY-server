@@ -2,7 +2,7 @@ import { MongoClient, Db } from "mongodb";
 import "dotenv/config";
 
 const MONGODB_URI = process.env.MONGODB_URI;
-const DB_NAME = process.env.DB_NAME || "pizzahub";
+const DB_NAME = process.env.DB_NAME || "pizza";
 
 if (!MONGODB_URI) {
     throw new Error("MONGODB_URI is missing from environment variables");
@@ -11,19 +11,27 @@ if (!MONGODB_URI) {
 const client = new MongoClient(MONGODB_URI);
 
 let database: Db;
+let connectionPromise: Promise<void> | null = null;
 
 export const connectDB = async (): Promise<void> => {
-    try {
-        await client.connect();
+    if (database) return;
 
-        database = client.db(DB_NAME);
+    if (!connectionPromise) {
+        connectionPromise = client.connect()
+            .then(() => {
+                database = client.db(DB_NAME);
 
-        console.log("MongoDB connected successfully!");
-        console.log(`Database: ${DB_NAME}`);
-    } catch (error) {
-        console.error("MongoDB connection failed:", error);
-        process.exit(1);
+                console.log("MongoDB connected successfully!");
+                console.log(`Database: ${DB_NAME}`);
+            })
+            .catch((error) => {
+                connectionPromise = null;
+                console.error("MongoDB connection failed:", error);
+                throw error;
+            });
     }
+
+    await connectionPromise;
 };
 
 export const getDB = (): Db => {
