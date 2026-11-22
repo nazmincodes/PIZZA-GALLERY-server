@@ -137,7 +137,7 @@ export const updateMenuApprovalStatus = async (
         const result = await getMenuCollection().updateOne(
             {
                 _id: new ObjectId(menuItemId),
-                status: "pending",
+        
             },
             {
                 $set: {
@@ -678,6 +678,220 @@ export const getMenuStatistics = async (
         res.status(500).json({
             success: false,
             message: "Failed to retrieve menu statistics.",
+        });
+    }
+};
+
+// Admin: Get All Menu Items (Pending, Approved, Rejected)
+export const getAllMenuItems = async (
+    _req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const menuItems = await getMenuCollection()
+            .find({})
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        res.status(200).json({
+            success: true,
+            message: "All menu items retrieved successfully.",
+            total: menuItems.length,
+            menuItems,
+        });
+    } catch (error) {
+        console.error("Get all menu items error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve menu items.",
+        });
+    }
+};
+
+
+// Admin: Platform Overview
+export const getPlatformOverview = async (
+    _req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const userCollection = getDB().collection("user");
+        const vendorCollection = getVendorCollection();
+        const menuCollection = getMenuCollection();
+        const orderCollection = getOrderCollection();
+        const transactionCollection = getTransactionCollection();
+
+        const [
+            totalUsers,
+            totalCustomers,
+            totalVendors,
+            pendingVendors,
+            totalMenuItems,
+            pendingMenuItems,
+            approvedMenuItems,
+            rejectedMenuItems,
+            totalOrders,
+            pendingOrders,
+            deliveredOrders,
+            totalTransactions,
+            successfulTransactions,
+            failedTransactions,
+        ] = await Promise.all([
+            userCollection.countDocuments(),
+            userCollection.countDocuments({ role: "customer" }),
+            vendorCollection.countDocuments(),
+            vendorCollection.countDocuments({ status: "pending" }),
+
+            menuCollection.countDocuments(),
+            menuCollection.countDocuments({ status: "pending" }),
+            menuCollection.countDocuments({ status: "approved" }),
+            menuCollection.countDocuments({ status: "rejected" }),
+
+            orderCollection.countDocuments(),
+            orderCollection.countDocuments({ status: "pending" }),
+            orderCollection.countDocuments({ status: "delivered" }),
+
+            transactionCollection.countDocuments(),
+            transactionCollection.countDocuments({ status: "succeeded" }),
+            transactionCollection.countDocuments({ status: "failed" }),
+        ]);
+
+        res.status(200).json({
+            success: true,
+            message: "Platform overview retrieved successfully.",
+            statistics: {
+                totalUsers,
+                totalCustomers,
+                totalVendors,
+                pendingVendors,
+
+                totalMenuItems,
+                pendingMenuItems,
+                approvedMenuItems,
+                rejectedMenuItems,
+
+                totalOrders,
+                pendingOrders,
+                deliveredOrders,
+
+                totalTransactions,
+                successfulTransactions,
+                failedTransactions,
+
+                pendingApprovals: pendingMenuItems + pendingVendors,
+            },
+        });
+    } catch (error) {
+        console.error("Platform overview error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve platform overview.",
+        });
+    }
+};
+
+
+// Default Platform Settings
+const DEFAULT_PLATFORM_SETTINGS = {
+    platformName: "PizzaHub",
+    supportEmail: "",
+    supportPhone: "",
+    maintenanceMode: false,
+    maintenanceMessage: "We are currently improving PizzaHub. Please check back soon.",
+    updatedAt: null as Date | null,
+};
+
+
+// Admin: Get Platform Settings
+export const getPlatformSettings = async (
+    _req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const collection = getDB().collection("platform_settings");
+
+        const savedSettings = await collection.findOne({
+            _id: "platform" as never,
+        });
+
+        res.status(200).json({
+            success: true,
+            settings: {
+                ...DEFAULT_PLATFORM_SETTINGS,
+                ...(savedSettings || {}),
+            },
+        });
+    } catch (error) {
+        console.error("Get platform settings error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to retrieve platform settings.",
+        });
+    }
+};
+
+
+// Admin: Update Platform Settings
+export const updatePlatformSettings = async (
+    req: Request,
+    res: Response
+): Promise<void> => {
+    try {
+        const {
+            platformName,
+            supportEmail,
+            supportPhone,
+            maintenanceMode,
+            maintenanceMessage,
+        } = req.body;
+
+        if (
+            typeof platformName !== "string" ||
+            !platformName.trim() ||
+            typeof supportEmail !== "string" ||
+            typeof supportPhone !== "string" ||
+            typeof maintenanceMode !== "boolean" ||
+            typeof maintenanceMessage !== "string"
+        ) {
+            res.status(400).json({
+                success: false,
+                message: "Invalid platform settings.",
+            });
+            return;
+        }
+
+        const settings = {
+            platformName: platformName.trim(),
+            supportEmail: supportEmail.trim(),
+            supportPhone: supportPhone.trim(),
+            maintenanceMode,
+            maintenanceMessage: maintenanceMessage.trim(),
+            updatedAt: new Date(),
+            updatedBy: req.user?.id || null,
+        };
+
+        const collection = getDB().collection("platform_settings");
+
+        await collection.updateOne(
+            { _id: "platform" as never },
+            { $set: settings },
+            { upsert: true }
+        );
+
+        res.status(200).json({
+            success: true,
+            message: "Platform settings updated successfully.",
+            settings,
+        });
+    } catch (error) {
+        console.error("Update platform settings error:", error);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to update platform settings.",
         });
     }
 };

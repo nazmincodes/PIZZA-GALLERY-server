@@ -12,6 +12,11 @@ import {
     getAllUsers,
     updateUserBanStatus,
     getMenuStatistics,
+    getAllMenuItems,
+    getPlatformOverview,
+    getPlatformSettings,
+    updatePlatformSettings,
+   
 } from "../controllers/admin.controller.js";
 
 import { menuApprovalSchema } from "../validators/menu.validator.js";
@@ -119,6 +124,38 @@ router.get(
     authorizeRoles("admin"),
     getMenuStatistics
 );
+// Admin: Get All Menu Items (All Statuses)
+router.get(
+    "/menu/all",
+    authenticateUser,
+    authorizeRoles("admin"),
+    getAllMenuItems
+);
+
+// Admin: Get Platform Overview
+router.get(
+    "/overview",
+    authenticateUser,
+    authorizeRoles("admin"),
+    getPlatformOverview
+);
+
+// Admin: Get Platform Settings
+router.get(
+    "/settings",
+    authenticateUser,
+    authorizeRoles("admin"),
+    getPlatformSettings
+);
+
+// Admin: Update Platform Settings
+router.patch(
+    "/settings",
+    authenticateUser,
+    authorizeRoles("admin"),
+    updatePlatformSettings
+);
+
 
 export default router;
 
